@@ -2,15 +2,104 @@
 <html>
 <head>
     <title>i-harmonium</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=Cormorant:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet">
     <style>
-        body { background: #2c1a12; color: #f4e4bc; font-family: serif; text-align: center; padding: 20px; cursor: pointer; }
-        .piano { display: flex; justify-content: center; margin: 40px; }
-        .key { border: 2px solid #f4e4bc; width: 60px; height: 200px; margin: 2px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px; font-weight: bold; position: relative; border-radius: 0 0 5px 5px; }
-        .black { background: #1a100b; color: white; height: 120px; width: 40px; margin-left: -20px; margin-right: -20px; z-index: 2; border-color: #555; }
-        .active { background: #d4a373 !important; color: #2c1a12; box-shadow: inset 0 5px 10px rgba(0,0,0,0.5); }
-        #bellows-meter { width: 400px; height: 12px; border: 1px solid #f4e4bc; margin: 20px auto; border-radius: 10px; overflow: hidden; }
-        #fill { width: 0%; height: 100%; background: #d4a373; transition: width 0.05s linear; }
-        #status-tip { font-style: italic; font-size: 0.9em; color: #8a7a6a; }
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --border: #222222;
+            --text: #c8c0b0;
+            --muted: #444440;
+            --accent: #c4a882;
+            --key-white: #161614;
+            --key-black: #0a0a09;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Mono', monospace;
+            text-align: center;
+            padding: 48px 20px;
+            min-height: 100vh;
+        }
+        h1 {
+            font-family: 'Cormorant', serif;
+            font-weight: 300;
+            font-style: italic;
+            font-size: 2.8rem;
+            letter-spacing: 0.08em;
+            color: var(--accent);
+            margin-bottom: 8px;
+        }
+        #status-tip {
+            font-size: 0.7rem;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-bottom: 36px;
+        }
+        #bellows-meter {
+            width: 320px;
+            height: 2px;
+            background: var(--border);
+            margin: 0 auto 12px;
+        }
+        #fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.05s linear;
+            width: 0%;
+        }
+        #angle-display {
+            font-size: 0.65rem;
+            letter-spacing: 0.15em;
+            color: var(--muted);
+            text-transform: uppercase;
+            font-weight: 300;
+            margin-bottom: 48px;
+        }
+        .piano {
+            display: flex;
+            justify-content: center;
+            margin: 0 auto;
+            position: relative;
+            height: 200px;
+            width: fit-content;
+        }
+        .key {
+            border: 1px solid var(--border);
+            width: 52px;
+            height: 190px;
+            margin: 0 1px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 12px;
+            font-size: 0.6rem;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+            position: relative;
+            border-radius: 0 0 3px 3px;
+            background: var(--key-white);
+            transition: background 0.05s, color 0.05s;
+            user-select: none;
+        }
+        .black {
+            background: var(--key-black);
+            height: 115px;
+            width: 34px;
+            margin-left: -17px;
+            margin-right: -17px;
+            z-index: 2;
+            border-color: #1a1a1a;
+            color: #2a2a28;
+        }
+        .active {
+            background: var(--accent) !important;
+            color: var(--bg) !important;
+            border-color: var(--accent) !important;
+        }
     </style>
 </head>
 <body>
@@ -37,18 +126,47 @@
     </div>
 
     <script>
-        const notes = {'a':261.63, 'w':277.18, 's':293.66, 'e':311.13, 'd':329.63, 'f':349.23, 't':369.99, 'g':392.00, 'y':415.30, 'h':440.00, 'u':466.16, 'j':493.88, 'k':523.25};
-        let audioCtx, masterGain, bellows = 0, lastAngle = 0;
+        // C3 octave — warm harmonium range
+        const notes = {'a':130.81,'w':138.59,'s':146.83,'e':155.56,'d':164.81,'f':174.61,'t':185.00,'g':196.00,'y':207.65,'h':220.00,'u':233.08,'j':246.94,'k':261.63};
+        let audioCtx, masterGain, reverbNode, filterNode, bellows = 0, lastAngle = 0;
         let activeOscs = {};
 
-        // Automatic initialization on first interaction
-        const initAudio = () => {
+        const initAudio = async () => {
             if (audioCtx) return;
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+            // Warm low-pass filter
+            filterNode = audioCtx.createBiquadFilter();
+            filterNode.type = 'lowpass';
+            filterNode.frequency.value = 1800;
+            filterNode.Q.value = 0.7;
+
+            // Reverb via convolver
+            reverbNode = audioCtx.createConvolver();
+            const rate = audioCtx.sampleRate;
+            const length = rate * 2.5;
+            const impulse = audioCtx.createBuffer(2, length, rate);
+            for (let c = 0; c < 2; c++) {
+                const ch = impulse.getChannelData(c);
+                for (let i = 0; i < length; i++) {
+                    ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5);
+                }
+            }
+            reverbNode.buffer = impulse;
+
             masterGain = audioCtx.createGain();
             masterGain.gain.value = 0;
+
+            // dry → filter → master; wet → reverb → master
+            filterNode.connect(masterGain);
+            filterNode.connect(reverbNode);
+            const reverbGain = audioCtx.createGain();
+            reverbGain.gain.value = 0.28;
+            reverbNode.connect(reverbGain);
+            reverbGain.connect(masterGain);
             masterGain.connect(audioCtx.destination);
-            document.getElementById('status-tip').innerText = "Audio Active - Ready to play";
+
+            document.getElementById('status-tip').innerText = "audio active — hold keys and push lid";
         };
 
         window.addEventListener('mousedown', initAudio);
@@ -64,9 +182,10 @@
             if (lastAngle !== 0) {
                 let change = lastAngle - angle; 
                 if (change > 0.05) {
-                    bellows = Math.min(1.0, bellows + (change * 1.5)); 
+                    const fillAmount = change * 0.08 * (1 - bellows); // speed drives fill, diminishing returns near full
+                    bellows = Math.min(1.0, bellows + fillAmount);
                 } else {
-                    bellows *= 0.98; 
+                    bellows *= 0.995; 
                 }
             }
             lastAngle = angle;
@@ -74,7 +193,7 @@
 
         // Natural air decay
         setInterval(() => {
-            bellows *= 0.95; 
+            bellows *= 0.992; 
             document.getElementById('fill').style.width = (bellows * 100) + "%";
             if (masterGain) masterGain.gain.setTargetAtTime(bellows, audioCtx.currentTime, 0.05);
         }, 50);
@@ -82,21 +201,33 @@
         window.onkeydown = (e) => {
             const key = e.key.toLowerCase();
             if (notes[key] && !activeOscs[key] && audioCtx) {
+                // Triangle for body, sine for warmth, detuned sine for chorus
                 const osc1 = audioCtx.createOscillator();
                 const osc2 = audioCtx.createOscillator();
-                osc1.type = 'sawtooth';
-                osc2.type = 'square';
+                const osc3 = audioCtx.createOscillator();
+                osc1.type = 'triangle';
+                osc2.type = 'sine';
+                osc3.type = 'sine';
                 osc1.frequency.value = notes[key];
-                osc2.frequency.value = notes[key] + 1.5; // Harmonic richness
-                
+                osc2.frequency.value = notes[key] * 2;      // octave up, soft
+                osc3.frequency.value = notes[key] + 0.7;    // slight detune for chorus
+
                 const g = audioCtx.createGain();
-                g.gain.value = 0.25; 
-                
-                osc1.connect(g); osc2.connect(g);
-                g.connect(masterGain);
-                
-                osc1.start(); osc2.start();
-                activeOscs[key] = {oscs: [osc1, osc2], gain: g};
+                g.gain.value = 0.35;
+                const g2 = audioCtx.createGain();
+                g2.gain.value = 0.08; // quiet harmonic
+                const g3 = audioCtx.createGain();
+                g3.gain.value = 0.18;
+
+                osc1.connect(g);
+                osc2.connect(g2);
+                osc3.connect(g3);
+                g.connect(filterNode);
+                g2.connect(filterNode);
+                g3.connect(filterNode);
+
+                osc1.start(); osc2.start(); osc3.start();
+                activeOscs[key] = {oscs: [osc1, osc2, osc3]};
                 const el = document.getElementById(`key-${key}`);
                 if(el) el.classList.add('active');
             }
