@@ -64,9 +64,10 @@
             if (lastAngle !== 0) {
                 let change = lastAngle - angle; 
                 if (change > 0.05) {
-                    bellows = Math.min(1.0, bellows + (change * 1.5)); 
+                    const fillAmount = change * 0.08 * (1 - bellows); // speed drives fill, diminishing returns near full
+                    bellows = Math.min(1.0, bellows + fillAmount);
                 } else {
-                    bellows *= 0.98; 
+                    bellows *= 0.995; 
                 }
             }
             lastAngle = angle;
@@ -74,7 +75,7 @@
 
         // Natural air decay
         setInterval(() => {
-            bellows *= 0.95; 
+            bellows *= 0.992; 
             document.getElementById('fill').style.width = (bellows * 100) + "%";
             if (masterGain) masterGain.gain.setTargetAtTime(bellows, audioCtx.currentTime, 0.05);
         }, 50);
